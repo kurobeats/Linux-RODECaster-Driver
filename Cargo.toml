@@ -1,0 +1,50 @@
+[package]
+name = "rodecaster-vad"
+version = "0.1.0"
+edition = "2021"
+description = "RODECaster Virtual Audio Device - Linux audio bridge daemon"
+license = "MIT"
+
+[[bin]]
+name = "rodecaster-vad"
+path = "src/main.rs"
+
+[dependencies]
+# ALSA bindings for Linux audio
+alsa = "0.9"
+
+# USB device access (libusb wrapper)
+rusb = "0.9"
+
+# POSIX shared memory and system calls
+nix = { version = "0.29", features = ["fs", "mman", "time", "sched", "signal"] }
+
+# Serialization for config
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Crossbeam for ring buffer
+crossbeam = "0.8"
+
+# systemd integration
+libsystemd = "0.7"
+
+# Smallvec
+smallvec = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+codegen-units = 1
+
+[profile.dev]
+opt-level = 0

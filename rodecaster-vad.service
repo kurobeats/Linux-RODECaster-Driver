@@ -1,0 +1,42 @@
+[Unit]
+Description=RODECaster Virtual Audio Device Daemon
+Documentation=https://github.com/rode-microphones/rodecaster-vad
+After=network.target sound.target
+Wants=sound.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rodecaster-vad
+Restart=always
+RestartSec=5
+
+# Real-time audio needs real-time priority
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+LimitNICE=-20
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=95
+
+# Security hardening
+User=root
+Group=audio
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/dev/shm
+PrivateTmp=yes
+PrivateDevices=no
+DeviceAllow=/dev/snd/* rw
+DeviceAllow=/dev/bus/usb/* rw
+DevicePolicy=closed
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rodecaster-vad
+
+# systemd watchdog
+WatchdogSec=10
+
+[Install]
+WantedBy=multi-user.target

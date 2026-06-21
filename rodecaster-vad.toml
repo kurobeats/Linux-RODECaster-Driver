@@ -1,0 +1,120 @@
+# Default configuration for RODECaster Virtual Audio Device
+
+# Sample rate for all virtual channels (44100 or 48000)
+sample_rate = 48000
+
+# Frames per ALSA period (event-driven pull-mode equivalent)
+# 256 frames at 48kHz = ~5.3ms latency per period
+period_frames = 256
+
+# Number of periods in the ring buffer
+num_periods = 4
+
+# RODE Microphones USB vendor ID
+rode_vendor_id = 0x19F7
+
+# ALSA device name prefix
+alsa_device_prefix = "RODECaster"
+
+# Shared memory directory (default: /dev/shm)
+shm_dir = "/dev/shm"
+
+# --- Capture (Input) Channels ---
+# Maps to the 11 virtual input devices from the Windows driver
+[[capture_channels]]
+name = "System In"
+alsa_id = "System"
+channels = 2
+direction = "capture"
+
+[[capture_channels]]
+name = "Combo1 In"
+alsa_id = "Combo1"
+channels = 2
+direction = "capture"
+
+[[capture_channels]]
+name = "Combo2 In"
+alsa_id = "Combo2"
+channels = 2
+direction = "capture"
+
+[[capture_channels]]
+name = "Combo3 In"
+alsa_id = "Combo3"
+channels = 2
+direction = "capture"
+
+[[capture_channels]]
+name = "Combo4 In"
+alsa_id = "Combo4"
+channels = 2
+direction = "capture"
+
+[[capture_channels]]
+name = "Bluetooth In"
+alsa_id = "Bluetooth"
+channels = 2
+direction = "capture"
+
+[[capture_channels]]
+name = "SmartPads In"
+alsa_id = "SmartPads"
+channels = 2
+direction = "capture"
+
+[[capture_channels]]
+name = "USB1 Main In"
+alsa_id = "USB1Main"
+channels = 2
+direction = "capture"
+
+[[capture_channels]]
+name = "USB1 Chat In"
+alsa_id = "USB1Chat"
+channels = 2
+direction = "capture"
+
+[[capture_channels]]
+name = "USB2 In"
+alsa_id = "USB2"
+channels = 2
+direction = "capture"
+
+[[capture_channels]]
+name = "Headset In"
+alsa_id = "Headset"
+channels = 2
+direction = "capture"
+
+# --- Playback (Output) Channels ---
+# Maps to the 5 virtual output devices from the Windows driver
+[[playback_channels]]
+name = "System Out"
+alsa_id = "System"
+channels = 2
+direction = "playback"
+
+[[playback_channels]]
+name = "Music Out"
+alsa_id = "Music"
+channels = 2
+direction = "playback"
+
+[[playback_channels]]
+name = "Game Out"
+alsa_id = "Game"
+channels = 2
+direction = "playback"
+
+[[playback_channels]]
+name = "Virtual A Out"
+alsa_id = "VirtualA"
+channels = 2
+direction = "playback"
+
+[[playback_channels]]
+name = "Virtual B Out"
+alsa_id = "VirtualB"
+channels = 2
+direction = "playback"
