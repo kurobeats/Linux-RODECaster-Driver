@@ -13,7 +13,6 @@ use crate::config::VadConfig;
 use crate::shm::ShmRegion;
 use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::Arc;
 
 /// Magic identifier for validation
 pub const RINGBUF_MAGIC: u32 = 0x524F4445; // "RODE"
@@ -299,6 +298,78 @@ impl RingBuffer {
         self.hdr().write_index.store(0, Ordering::Release);
         self.hdr().read_index.store(0, Ordering::Release);
     }
+
+    /// Get the buffer fill percentage (0.0 = empty, 1.0 = full).
+    /// Used for drift compensation monitoring.
+    pub fn fill_ratio(&self) -> f32 {
+        let avail = self.available_frames();
+        if self.buffer_frames == 0 {
+            return 0.0;
+        }
+        avail as f32 / self.buffer_frames as f32
+    }
+}
+
+/// Double-buffered ring buffer pair for ping-pong audio transfer.
+/// While the consumer reads from one buffer, the producer writes to the other.
+/// Matches the Windows driver's two shared memory regions pattern.
+pub struct DoubleRingBuffer {
+    pub front: RingBuffer,
+    pub back: RingBuffer,
+    /// Front buffer is active for reading
+    pub front_active: std::sync::atomic::AtomicBool,
+}
+
+unsafe impl Send for DoubleRingBuffer {}
+unsafe impl Sync for DoubleRingBuffer {}
+
+impl DoubleRingBuffer {
+    pub fn create(name: &str, format: &AudioFormat, buffer_frames: u32) -> Result<Self> {
+        let front = RingBuffer::create(&format!("{}_{}", name, 0), format, buffer_frames)?;
+        let back  = RingBuffer::create(&format!("{}_{}", name, 1), format, buffer_frames)?;
+        Ok(Self {
+            front,
+            back,
+            front_active: std::sync::atomic::AtomicBool::new(true),
+        })
+    }
+
+    /// Write to the back buffer (producer side)
+    pub fn write_back(&self, data: &[u8]) -> Result<usize> {
+        self.back.write(data)
+    }
+
+    /// Read from the front buffer (consumer side)
+    pub fn read_front(&self, buf: &mut [u8]) -> Result<usize> {
+        self.front.read(buf)
+    }
+
+    /// Atomically swap front and back buffers at a period boundary
+    pub fn swap(&self) {
+        self.front_active.fetch_xor(true, Ordering::Release);
+        let was_front = self.front_active.load(Ordering::Acquire);
+        // Copy the back buffer indices into the front for the next read
+        if was_front {
+            let w = self.back.hdr().write_index.load(Ordering::Acquire);
+            self.front.hdr().write_index.store(w, Ordering::Release);
+            self.front.hdr().read_index.store(0, Ordering::Release);
+        }
+    }
+
+    pub fn is_running(&self) -> bool { self.front.is_running() }
+
+    pub fn set_running(&self, r: bool) {
+        self.front.set_running(r);
+        self.back.set_running(r);
+    }
+
+    pub fn available_frames(&self) -> usize { self.front.available_frames() }
+
+    pub fn frame_bytes(&self) -> usize { self.front.frame_bytes() }
+
+    pub fn fill_ratio(&self) -> f32 { self.front.fill_ratio() }
+
+    pub fn reset(&self) { self.front.reset(); self.back.reset(); }
 }
 
 /// Set of ring buffers — one per virtual audio channel
@@ -359,5 +430,215 @@ impl RingBufferSet {
         for rb in &self.playback {
             rb.set_running(false);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio_format::{AudioFormat, SampleFormat};
+    use std::sync::atomic::Ordering;
+
+    fn test_format() -> AudioFormat {
+        AudioFormat {
+            sample_rate: 48000,
+            channels: 2,
+            format: SampleFormat::S32LE,
+        }
+    }
+
+    #[test]
+    fn test_ring_buffer_basic_write_read() {
+        let fmt = test_format();
+        let rb = RingBuffer::create("/test_rb_basic", &fmt, 1024)
+            .expect("Failed to create ring buffer");
+
+        rb.set_running(true);
+
+        assert_eq!(rb.frame_bytes(), 8); // 2ch * 4 bytes
+        assert_eq!(rb.available_frames(), 0);
+
+        // Write 256 frames (2048 bytes) of test data
+        let data: Vec<u8> = (0..2048).map(|i| (i % 256) as u8).collect();
+        let written = rb.write(&data).expect("Write failed");
+        assert_eq!(written, 256);
+
+        assert_eq!(rb.available_frames(), 256);
+
+        // Read back
+        let mut read_buf = vec![0u8; 2048];
+        let read = rb.read(&mut read_buf).expect("Read failed");
+        assert_eq!(read, 256);
+
+        assert_eq!(&data[..2048], &read_buf[..2048]);
+        assert_eq!(rb.available_frames(), 0);
+    }
+
+    #[test]
+    fn test_ring_buffer_wraparound() {
+        let fmt = test_format();
+        let rb = RingBuffer::create("/test_rb_wrap", &fmt, 256)
+            .expect("Failed to create ring buffer");
+
+        rb.set_running(true);
+
+        // Fill buffer to 200 frames
+        let data_a = vec![0xAAu8; 200 * 8];
+        let written = rb.write(&data_a).expect("Write A failed");
+        assert_eq!(written, 200);
+
+        // Read some so we have room at end + beginning (wraparound territory)
+        let mut tmp = vec![0u8; 100 * 8];
+        let _ = rb.read(&mut tmp);
+
+        // Write more to force wraparound
+        let data_b = vec![0xBBu8; 150 * 8];
+        let written = rb.write(&data_b).expect("Write B failed");
+        assert_eq!(written, 150);
+
+        // Now read everything available
+        let mut all = vec![0u8; 1024 * 8];
+        let total_read = rb.read(&mut all).expect("Read all failed");
+
+        // We should have read 100 (remaining A) + 150 (B) = 250 frames
+        assert_eq!(total_read, 250);
+
+        // Verify A tail (should be 0xAA)
+        assert_eq!(all[0], 0xAA);
+        assert_eq!(all[99 * 8], 0xAA);
+
+        // Verify B head (should be 0xBB)
+        assert_eq!(all[100 * 8], 0xBB);
+    }
+
+    #[test]
+    fn test_ring_buffer_empty_read() {
+        let fmt = test_format();
+        let rb = RingBuffer::create("/test_rb_empty", &fmt, 512)
+            .expect("Failed to create ring buffer");
+
+        rb.set_running(true);
+
+        assert_eq!(rb.available_frames(), 0);
+
+        let mut buf = vec![0u8; 1024];
+        let read = rb.read(&mut buf).expect("Read empty failed");
+        assert_eq!(read, 0);
+    }
+
+    #[test]
+    fn test_ring_buffer_full_write() {
+        let fmt = test_format();
+        let rb = RingBuffer::create("/test_rb_full", &fmt, 256)
+            .expect("Failed to create ring buffer");
+
+        rb.set_running(true);
+
+        // Fill completely (leave 1 frame gap for full/empty distinction)
+        let data = vec![0xCCu8; 256 * 8]; // 256 frames
+        let written = rb.write(&data).expect("Write full failed");
+        assert_eq!(written, 255); // 255 fits (1 frame gap preserved)
+
+        let available = rb.available_frames();
+        assert_eq!(available, 255);
+    }
+
+    #[test]
+    fn test_ring_buffer_header_validation() {
+        let fmt = test_format();
+        let rb = RingBuffer::create("/test_rb_header", &fmt, 256)
+            .expect("Failed to create ring buffer");
+
+        rb.set_running(true);
+
+        let hdr = unsafe { &*rb.header };
+        assert_eq!(hdr.magic.load(Ordering::Acquire), RINGBUF_MAGIC);
+        assert_eq!(hdr.version.load(Ordering::Acquire), 1);
+        assert_eq!(hdr.frame_bytes.load(Ordering::Acquire), 8);
+        assert_eq!(hdr.channels.load(Ordering::Acquire), 2);
+        assert_eq!(hdr.sample_rate.load(Ordering::Acquire), 48000);
+        assert_eq!(hdr.buffer_frames.load(Ordering::Acquire), 256);
+    }
+
+    #[test]
+    fn test_ring_buffer_reset() {
+        let fmt = test_format();
+        let rb = RingBuffer::create("/test_rb_reset", &fmt, 256)
+            .expect("Failed to create ring buffer");
+
+        rb.set_running(true);
+
+        let data = vec![0xDDu8; 100 * 8];
+        let _ = rb.write(&data);
+        assert!(rb.available_frames() > 0);
+
+        rb.reset();
+        assert_eq!(rb.available_frames(), 0);
+    }
+
+    #[test]
+    fn test_ring_buffer_stop_flag() {
+        let fmt = test_format();
+        let rb = RingBuffer::create("/test_rb_stop", &fmt, 256)
+            .expect("Failed to create ring buffer");
+
+        assert!(!rb.is_running());
+        rb.set_running(true);
+        assert!(rb.is_running());
+        rb.set_running(false);
+        assert!(!rb.is_running());
+    }
+
+    #[test]
+    fn test_ring_buffer_large_transfer() {
+        let fmt = test_format();
+        let rb = RingBuffer::create("/test_rb_large", &fmt, 8192)
+            .expect("Failed to create ring buffer");
+
+        rb.set_running(true);
+
+        // Write 4096 frames in 4 chunks
+        for _ in 0..4 {
+            let chunk = vec![0xEFu8; 1024 * 8];
+            let written = rb.write(&chunk).expect("Write chunk failed");
+            assert_eq!(written, 1024);
+        }
+        assert_eq!(rb.available_frames(), 4096);
+
+        // Read back 4096 frames
+        let mut buf = vec![0u8; 4096 * 8];
+        let read = rb.read(&mut buf).expect("Read large failed");
+        assert_eq!(read, 4096);
+
+        // All should be 0xEF
+        for byte in &buf[..read * 8] {
+            assert_eq!(*byte, 0xEF);
+        }
+        assert_eq!(rb.available_frames(), 0);
+    }
+
+    #[test]
+    fn test_ring_buffer_partial_read() {
+        let fmt = test_format();
+        let rb = RingBuffer::create("/test_rb_partial", &fmt, 512)
+            .expect("Failed to create ring buffer");
+
+        rb.set_running(true);
+
+        let data = vec![0x42u8; 300 * 8];
+        let _ = rb.write(&data);
+        assert_eq!(rb.available_frames(), 300);
+
+        // Read only 100 frames
+        let mut buf = vec![0u8; 100 * 8];
+        let read = rb.read(&mut buf).expect("Partial read failed");
+        assert_eq!(read, 100);
+        assert_eq!(rb.available_frames(), 200);
+
+        // Read remaining 200
+        let mut buf2 = vec![0u8; 200 * 8];
+        let read2 = rb.read(&mut buf2).expect("Second read failed");
+        assert_eq!(read2, 200);
+        assert_eq!(rb.available_frames(), 0);
     }
 }

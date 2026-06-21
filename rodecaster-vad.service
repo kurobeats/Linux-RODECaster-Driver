@@ -5,7 +5,8 @@ After=network.target sound.target
 Wants=sound.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=all
 ExecStart=/usr/bin/rodecaster-vad
 Restart=always
 RestartSec=5

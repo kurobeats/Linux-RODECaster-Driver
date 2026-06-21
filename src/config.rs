@@ -88,31 +88,33 @@ impl Default for VadConfig {
     }
 }
 
-/// Build the 11 capture channel definitions (matching Windows INF topology)
+/// Build the 11 capture channel definitions (matching Windows INF topology — see Section 2.1)
 pub fn build_capture_channels() -> Vec<ChannelConfig> {
     vec![
-        ChannelConfig { name: "System In".into(),    alsa_id: "System".into(),    channels: 2, direction: ChannelDirection::Capture },
-        ChannelConfig { name: "Combo1 In".into(),     alsa_id: "Combo1".into(),    channels: 2, direction: ChannelDirection::Capture },
-        ChannelConfig { name: "Combo2 In".into(),     alsa_id: "Combo2".into(),    channels: 2, direction: ChannelDirection::Capture },
-        ChannelConfig { name: "Combo3 In".into(),     alsa_id: "Combo3".into(),    channels: 2, direction: ChannelDirection::Capture },
-        ChannelConfig { name: "Combo4 In".into(),     alsa_id: "Combo4".into(),    channels: 2, direction: ChannelDirection::Capture },
-        ChannelConfig { name: "Bluetooth In".into(),  alsa_id: "Bluetooth".into(), channels: 2, direction: ChannelDirection::Capture },
-        ChannelConfig { name: "SmartPads In".into(),  alsa_id: "SmartPads".into(), channels: 2, direction: ChannelDirection::Capture },
-        ChannelConfig { name: "USB1 Main In".into(),  alsa_id: "USB1Main".into(),  channels: 2, direction: ChannelDirection::Capture },
-        ChannelConfig { name: "USB1 Chat In".into(),  alsa_id: "USB1Chat".into(),  channels: 2, direction: ChannelDirection::Capture },
-        ChannelConfig { name: "USB2 In".into(),       alsa_id: "USB2".into(),      channels: 2, direction: ChannelDirection::Capture },
-        ChannelConfig { name: "Headset In".into(),    alsa_id: "Headset".into(),   channels: 2, direction: ChannelDirection::Capture },
+        // #  | INF Section | KS Name   | Friendly Name (from INF Strings)
+        ChannelConfig { name: "System In".into(),     alsa_id: "System".into(),     channels: 2, direction: ChannelDirection::Capture },     // 1
+        ChannelConfig { name: "Combo 1 In".into(),    alsa_id: "Combo1".into(),     channels: 2, direction: ChannelDirection::Capture },     // 2
+        ChannelConfig { name: "Combo 2 In".into(),    alsa_id: "Combo2".into(),     channels: 2, direction: ChannelDirection::Capture },     // 3
+        ChannelConfig { name: "Combo 3 In".into(),    alsa_id: "Combo3".into(),     channels: 2, direction: ChannelDirection::Capture },     // 4
+        ChannelConfig { name: "Combo 4 In".into(),    alsa_id: "Combo4".into(),     channels: 2, direction: ChannelDirection::Capture },     // 5
+        ChannelConfig { name: "Bluetooth In".into(),  alsa_id: "Bluetooth".into(),  channels: 2, direction: ChannelDirection::Capture },     // 6
+        ChannelConfig { name: "Smart Pads In".into(), alsa_id: "SmartPads".into(),  channels: 2, direction: ChannelDirection::Capture },     // 7
+        ChannelConfig { name: "USB1 Main In".into(),  alsa_id: "USB1Main".into(),   channels: 2, direction: ChannelDirection::Capture },     // 8
+        ChannelConfig { name: "USB1 Chat In".into(),  alsa_id: "USB1Chat".into(),   channels: 2, direction: ChannelDirection::Capture },     // 9
+        ChannelConfig { name: "USB2 In".into(),       alsa_id: "USB2".into(),       channels: 2, direction: ChannelDirection::Capture },     // 10
+        ChannelConfig { name: "Headset In".into(),    alsa_id: "Headset".into(),    channels: 2, direction: ChannelDirection::Capture },     // 11
     ]
 }
 
-/// Build the 5 playback channel definitions (matching Windows INF topology)
+/// Build the 5 playback channel definitions (matching Windows INF topology — see Section 2.2)
 pub fn build_playback_channels() -> Vec<ChannelConfig> {
     vec![
-        ChannelConfig { name: "System Out".into(),   alsa_id: "System".into(),   channels: 2, direction: ChannelDirection::Playback },
-        ChannelConfig { name: "Music Out".into(),    alsa_id: "Music".into(),    channels: 2, direction: ChannelDirection::Playback },
-        ChannelConfig { name: "Game Out".into(),     alsa_id: "Game".into(),     channels: 2, direction: ChannelDirection::Playback },
-        ChannelConfig { name: "Virtual A Out".into(), alsa_id: "VirtualA".into(), channels: 2, direction: ChannelDirection::Playback },
-        ChannelConfig { name: "Virtual B Out".into(), alsa_id: "VirtualB".into(), channels: 2, direction: ChannelDirection::Playback },
+        // #  | INF Section         | KS Name   | Friendly Name (from INF Strings)
+        ChannelConfig { name: "System Out".into(),    alsa_id: "System".into(),    channels: 2, direction: ChannelDirection::Playback },   // 1
+        ChannelConfig { name: "Music Out".into(),     alsa_id: "Music".into(),     channels: 2, direction: ChannelDirection::Playback },   // 2
+        ChannelConfig { name: "Game Out".into(),      alsa_id: "Game".into(),      channels: 2, direction: ChannelDirection::Playback },   // 3
+        ChannelConfig { name: "Virtual A Out".into(), alsa_id: "VirtualA".into(),  channels: 2, direction: ChannelDirection::Playback },   // 4
+        ChannelConfig { name: "Virtual B Out".into(), alsa_id: "VirtualB".into(),  channels: 2, direction: ChannelDirection::Playback },   // 5
     ]
 }
 

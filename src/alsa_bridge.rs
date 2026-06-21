@@ -8,11 +8,11 @@
 //! Equivalent to the Windows `CKsAudCapFilter` / `CKsAudRenFilter` classes.
 
 use crate::audio_format::AudioFormat;
-use crate::channel_map::ChannelMap;
 use crate::config::VadConfig;
-use crate::ring_buffer::{RingBuffer, RingBufferSet};
+use crate::mixer::MixerState;
+use crate::ring_buffer::RingBufferSet;
 use anyhow::{Context, Result};
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -70,12 +70,10 @@ fn open_pcm_device(
         let name = format!("hw:{},0", card_idx);
         if let Ok(pcm) = alsa::pcm::PCM::new(&name, direction, false) {
             // Check if this card has the right name
-            if let Ok(info) = alsa::card::Card::new(card_idx).and_then(|c| {
-                let name = c.get_name()?;
-                Ok(name)
-            }) {
-                if info.contains("RODECaster") || info.contains("Loopback") {
-                    info!("Using ALSA PCM: {} (card {})", name, card_idx);
+            let card = alsa::card::Card::new(card_idx);
+            if let Ok(card_name) = card.get_name() {
+                if card_name.contains("RODECaster") || card_name.contains("Loopback") {
+                    info!("Using ALSA PCM: {}", card_name);
                     return Ok((pcm, name));
                 }
             }
@@ -90,7 +88,7 @@ fn open_pcm_device(
 }
 
 /// Main ALSA bridge loop — runs in a dedicated thread
-pub fn run_alsa_bridge(cfg: &VadConfig, ring_buffers: &RingBufferSet) -> Result<()> {
+pub fn run_alsa_bridge(cfg: &VadConfig, ring_buffers: &RingBufferSet, mixers: &MixerState) -> Result<()> {
     info!("ALSA bridge starting...");
 
     let format = AudioFormat {
@@ -104,7 +102,6 @@ pub fn run_alsa_bridge(cfg: &VadConfig, ring_buffers: &RingBufferSet) -> Result<
 
     // Allocate reusable buffers
     let mut cap_buf: Vec<u8> = vec![0u8; period_bytes];
-    let mut pb_buf: Vec<u8> = vec![0u8; period_bytes];
 
     let interval = Duration::from_secs_f64(period_frames as f64 / cfg.sample_rate as f64);
 
@@ -122,7 +119,7 @@ pub fn run_alsa_bridge(cfg: &VadConfig, ring_buffers: &RingBufferSet) -> Result<
         if i < ring_buffers.capture.len() {
             match open_pcm_device(&ch.alsa_id, alsa::Direction::Capture) {
                 Ok((pcm, name)) => {
-                    match format.apply_to_pcm(&pcm) {
+                    match format.apply_to_pcm(&pcm, period_frames, cfg.num_periods as usize) {
                         Ok(()) => {
                             format.apply_sw_params(&pcm, period_frames, cfg.num_periods as usize)
                                 .context("Failed to set SW params")?;
@@ -148,7 +145,7 @@ pub fn run_alsa_bridge(cfg: &VadConfig, ring_buffers: &RingBufferSet) -> Result<
         if i < ring_buffers.playback.len() {
             match open_pcm_device(&ch.alsa_id, alsa::Direction::Playback) {
                 Ok((pcm, name)) => {
-                    match format.apply_to_pcm(&pcm) {
+                    match format.apply_to_pcm(&pcm, period_frames, cfg.num_periods as usize) {
                         Ok(()) => {
                             format.apply_sw_params(&pcm, period_frames, cfg.num_periods as usize)
                                 .context("Failed to set SW params")?;
@@ -201,11 +198,13 @@ pub fn run_alsa_bridge(cfg: &VadConfig, ring_buffers: &RingBufferSet) -> Result<
                 });
             } else {
                 let bytes_read = n_frames * format.frame_bytes();
-                // Convert interleaved i32 samples for ALSA
-                let samples: Vec<i32> = cap_buf[..bytes_read]
-                    .chunks_exact(4)
-                    .map(|chunk| i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-                    .collect();
+                // Use the format-aware conversion utility
+                let mut samples = format.bytes_to_i32(&cap_buf[..bytes_read]);
+
+                // Apply mixer (volume/mute) if available
+                if *buf_idx < mixers.capture_mixers.len() {
+                    crate::mixer::apply_mixer(&mut samples, &mixers.capture_mixers[*buf_idx]);
+                }
 
                 if let Ok(io) = pcm.io_i32() {
                     let written = io.writei(&samples).unwrap_or(0);
@@ -227,11 +226,8 @@ pub fn run_alsa_bridge(cfg: &VadConfig, ring_buffers: &RingBufferSet) -> Result<
             if let Ok(io) = pcm.io_i32() {
                 let read = io.readi(&mut samples).unwrap_or(0);
                 if read > 0 {
-                    // Convert i32 samples back to interleaved bytes
-                    let mut audio_data: Vec<u8> = Vec::with_capacity(read * 4);
-                    for &sample in &samples[..read * format.channels as usize] {
-                        audio_data.extend_from_slice(&sample.to_le_bytes());
-                    }
+                    // Convert i32 samples back to bytes using the format utility
+                    let audio_data = format.i32_to_bytes(&samples[..read * format.channels as usize]);
                     let _ = ring_buffers.playback[*buf_idx].write(&audio_data);
                 }
             }
