@@ -17,10 +17,12 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 /// Known RODE USB product IDs (from reverse engineering)
+/// 0x0030 is the product ID used by the PipeWire rodecaster-pro2-pipewire config
 const KNOWN_RODE_PRODUCTS: &[(u16, &str)] = &[
     (0x0011, "RODECaster Pro"),
     (0x0012, "RODECaster Pro II (2026)"),
     (0x0013, "RODECaster Duo (2026)"),
+    (0x0030, "RODECaster Pro II"),
     (0x0040, "RØDE AI-1"),
     (0x0041, "RØDE NT-USB"),
 ];

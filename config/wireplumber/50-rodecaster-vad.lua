@@ -1,31 +1,20 @@
-# WirePlumber configuration for RODECaster Virtual Audio Device
-# ==============================================================
-# Place this file at:
-#   ~/.config/wireplumber/main.lua.d/50-rodecaster-vad.lua
-#
-# This creates persistent device names for each virtual RODECaster channel
-# so they appear consistently in PulseAudio/PipeWire applications.
+-- WirePlumber configuration for RODECaster Virtual Audio Device
+-- ==============================================================
+-- Place this file at:
+--   ~/.config/wireplumber/main.lua.d/50-rodecaster-vad.lua
+--
+-- This renames the snd-aloop loopback card and each of its 16 subdevices
+-- so they appear with consistent, human-readable names in PipeWire
+-- applications (pavucontrol, qpwgraph, OBS, etc.).
+--
+-- Subdevice layout (matches the Windows RODECaster VAD topology):
+--   Capture 0-10  → 11 input channels (System In, Combo1-4 In,
+--                     Bluetooth In, SmartPads In, USB1 Main In,
+--                     USB1 Chat In, USB2 In, Headset In)
+--   Playback 11-15 → 5 output channels (System Out, Music Out,
+--                     Game Out, Virtual A Out, Virtual B Out)
 
-rule = {
-  matches = {
-    -- Match snd-aloop devices with our naming convention
-    { "alsa.card.name", "matches", "Loopback" },
-  },
-  apply_properties = {
-    ["api.alsa.card.name"]      = "RODECaster_VAD",
-    ["device.nick"]             = "RODECaster Virtual Audio",
-    ["device.description"]      = "RODECaster Virtual Audio Device",
-    ["device.icon-name"]        = "audio-card-analog-usb",
-    ["device.profile-set"]      = "rodecaster-vad.conf",
-  },
-}
-
--- Individual node descriptions for each subdevice
--- Subdevice 0 = System, 1 = Combo1, 2 = Combo2, 3 = Combo3, 4 = Combo4
--- Subdevice 5 = Bluetooth, 6 = SmartPads, 7 = USB1Main, 8 = USB1Chat
--- Subdevice 9 = USB2, 10 = Headset
--- Subdevice 11 = System Out, 12 = Music, 13 = Game, 14 = VirtualA, 15 = VirtualB
-
+-- Capture (Input) channel names — subdevices 0 through 10
 capture_names = {
   [0]  = "System In",
   [1]  = "Combo 1 In",
@@ -40,6 +29,7 @@ capture_names = {
   [10] = "Headset In",
 }
 
+-- Playback (Output) channel names — subdevices 11 through 15
 playback_names = {
   [0] = "System Out",
   [1] = "Music Out",
@@ -48,36 +38,59 @@ playback_names = {
   [4] = "Virtual B Out",
 }
 
-for i, name in pairs(capture_names) do
-  table.insert(rule, {
+-- Ensure the ALSA monitor rules table exists (base config creates it)
+alsa_monitor.rules = alsa_monitor.rules or {}
+
+-- Card-level rule: renames the snd-aloop card to "RODECaster_VAD"
+table.insert(alsa_monitor.rules, {
+  matches = {
+    { "alsa.card.name", "matches", "Loopback" },
+  },
+  apply_properties = {
+    ["api.alsa.card.name"]      = "RODECaster_VAD",
+    ["device.nick"]             = "RODECaster Virtual Audio",
+    ["device.description"]      = "RODECaster Virtual Audio Device",
+    ["device.icon-name"]        = "audio-card-analog-usb",
+  },
+})
+
+-- Per-subdevice rules for capture (input) channels
+-- Matches snd-aloop PCM nodes like "alsa_input...Loopback...DEV=0"
+for i = 0, 10 do
+  local name = capture_names[i]
+  table.insert(alsa_monitor.rules, {
     matches = {
-      { "alsa.card.name", "matches", "Loopback" },
-      { "alsa.pcm.stream", "equals", "capture" },
-      { "alsa.pcm.device", "equals", i },
+      { "alsa.card.name",    "matches", "Loopback" },
+      { "alsa.pcm.stream",   "equals",  "capture" },
+      { "alsa.pcm.device",   "equals",  tostring(i) },
     },
     apply_properties = {
-      ["node.name"]        = "rodecaster_capture_" .. i,
-      ["node.description"] = "RODECaster " .. name,
-      ["node.nick"]        = name,
-      ["media.class"]      = "Audio/Source",
-      ["priority.session"] = 800,
+      ["node.name"]           = "alsa_input.rodecaster_vad_" .. i,
+      ["node.description"]    = "RODECaster " .. name,
+      ["node.nick"]           = name,
+      ["media.class"]         = "Audio/Source",
+      ["priority.session"]    = 800,
     },
   })
 end
 
-for i, name in pairs(playback_names) do
-  table.insert(rule, {
+-- Per-subdevice rules for playback (output) channels
+-- snd-aloop playback subdevices start at device 11
+for i = 0, 4 do
+  local name = playback_names[i]
+  local dev = i + 11
+  table.insert(alsa_monitor.rules, {
     matches = {
-      { "alsa.card.name", "matches", "Loopback" },
-      { "alsa.pcm.stream", "equals", "playback" },
-      { "alsa.pcm.device", "equals", i + 11 },
+      { "alsa.card.name",    "matches", "Loopback" },
+      { "alsa.pcm.stream",   "equals",  "playback" },
+      { "alsa.pcm.device",   "equals",  tostring(dev) },
     },
     apply_properties = {
-      ["node.name"]        = "rodecaster_playback_" .. i,
-      ["node.description"] = "RODECaster " .. name,
-      ["node.nick"]        = name,
-      ["media.class"]      = "Audio/Sink",
-      ["priority.session"] = 800,
+      ["node.name"]           = "alsa_output.rodecaster_vad_" .. i,
+      ["node.description"]    = "RODECaster " .. name,
+      ["node.nick"]           = name,
+      ["media.class"]         = "Audio/Sink",
+      ["priority.session"]    = 800,
     },
   })
 end
